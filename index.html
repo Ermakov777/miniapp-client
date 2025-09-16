@@ -2,59 +2,231 @@
 <html lang="ru">
 <head>
   <meta charset="UTF-8" />
-  <title>ПРИП Mini App</title>
+  <title>ПРИП — Mini App (без бэкенда)</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="stylesheet" href="style.css" />
   <!-- Leaflet -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <!-- Telegram Mini App SDK -->
+  <!-- Telegram Mini App SDK (не обязателен, но пусть будет) -->
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
 </head>
 <body>
-  <header>
-    <h1>🌍 ПРИП / карта</h1>
-    <div class="actions">
-      <button id="buyPro">Купить PRO ⭐</button>
-      <button id="giftPro">Подарить 🎁</button>
-    </div>
-  </header>
-  <div id="map"></div>
+  <div id="app">
+    <aside id="left">
+      <div class="tabs">
+        <button class="tab active" data-port="Таганрог">Таганрог</button>
+        <button class="tab" data-port="Новороссийск">Новороссийск</button>
+      </div>
+      <div id="pripsList"></div>
+    </aside>
+
+    <main id="mapWrap">
+      <div id="map"></div>
+      <div id="crosshair"></div>
+      <div id="coordTip">—</div>
+    </main>
+
+    <aside id="right">
+      <h3>Добавить ПРИП (локально)</h3>
+      <label>Порт
+        <select id="port">
+          <option>Таганрог</option>
+          <option>Новороссийск</option>
+        </select>
+      </label>
+      <label>UTC начало <input id="startUtc" type="datetime-local" /></label>
+      <label>UTC конец <input id="endUtc" type="datetime-local" /></label>
+      <textarea id="pripText" rows="10" placeholder="Вставьте текст ПРИПа.
+Пример:
+ПРИП НОВОРОССИЙСК 356 КАРТА 38130
+ПОРТ ЯЛТА
+ОГОНЬ ЗНАКА НЕ ДЕЙСТВУЕТ
+1. МАССАНДРОВСКИЙ ПЕРЕДНИЙ 44-30-06.8С 034-12-26.8В
+2. МАССАНДРОВСКИЙ ЗАДНИЙ 44-30-10.6С 034-12-32.4В"></textarea>
+      <button id="btnPreview">Предпросмотр</button>
+      <button id="btnSave">Сохранить локально</button>
+      <div id="parseStatus"></div>
+    </aside>
+  </div>
 
   <script>
-    const API_BASE = "https://YOUR-BOT-HOST.com"; // замените
-    const PRICE_LABEL = "PRO 30 дней";
+    const tg = window.Telegram?.WebApp;
+    try { tg?.expand(); } catch(e){}
 
-    const tg = window.Telegram.WebApp;
-    tg.expand();
+    // --- Инициализация карты ---
+    const map = L.map('map', { zoomControl: true }).setView([44.6, 37.7], 7);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+      { attribution: '&copy; OpenStreetMap contributors' }).addTo(map);
 
-    const map = L.map('map').setView([44.6, 37.7], 7);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '&copy; OpenStreetMap contributors'
-    }).addTo(map);
+    // Кроссхейр и подсказка координат (формат: 44°30.6′ N, 037°48.0′ E)
+    const coordTip = document.getElementById('coordTip');
+    function toDegMin(x, isLat) {
+      const dir = isLat ? (x >= 0 ? 'N' : 'S') : (x >= 0 ? 'E' : 'W');
+      const v = Math.abs(x);
+      const d = Math.floor(v);
+      const m = (v - d) * 60;
+      return `${String(d).padStart(isLat?2:3,'0')}°${m.toFixed(1).padStart(4,'0')}′ ${dir}`;
+    }
+    map.on('mousemove', (e) => {
+      coordTip.textContent = `${toDegMin(e.latlng.lat,true)}, ${toDegMin(e.latlng.lng,false)}`;
+    });
 
-    async function createInvoice(beneficiaryTgId) {
-      try {
-        const userId = beneficiaryTgId || (tg.initDataUnsafe?.user?.id);
-        if (!userId) throw new Error("Нет user.id из Telegram WebApp");
-        const res = await fetch(`${API_BASE}/invoice`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ beneficiaryTelegramId: userId, label: PRICE_LABEL })
-        });
-        const data = await res.json();
-        if (!data.url) throw new Error("Сервер не вернул ссылку инвойса");
-        tg.openInvoice(data.url);
-      } catch (e) {
-        tg.showAlert("Ошибка: " + e.message);
+    // --- Простое хранилище локальных ПРИПов ---
+    const STORAGE_KEY = 'prips_local_v1';
+    const layerGroup = L.layerGroup().addTo(map);
+    function loadPrips() {
+      try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]'); }
+      catch { return []; }
+    }
+    function savePrips(arr) { localStorage.setItem(STORAGE_KEY, JSON.stringify(arr)); }
+    function nowUtc() { return new Date().toISOString(); }
+    function isActive(p) {
+      const n = new Date();
+      if (p.startUtc && n < new Date(p.startUtc)) return false;
+      if (p.endUtc && n > new Date(p.endUtc)) return false;
+      return true;
+    }
+
+    // --- Парсер координат (точки DD-MM-SS.s C/Ю и DDD-MM-SS.s В/З) ---
+    // Пример: 44-30-06.8С 034-12-26.8В
+    const ptRegex = /(\d{2})[-°](\d{2})[-°](\d{2}(?:\.\d+)?)\s*([СЮNS])\s+(\d{3})[-°](\d{2})[-°](\d{2}(?:\.\d+)?)\s*([ВЗEW])/iu;
+    function parseDMS(d, m, s, hemiLat) {
+      let val = (+d) + (+m)/60 + (+s)/3600;
+      if (/[СS]/i.test(hemiLat) && hemiLat.toUpperCase()!=='N') { /* русские буквы: С(евер) vs Ю(г) */
+        // здесь hemiLat — для широты: С или Ю (N/S)
+      }
+      return val;
+    }
+    function dmsToDeg(dd, mm, ss, hemi) {
+      let v = (+dd) + (+mm)/60 + (+ss)/3600;
+      const h = hemi.toUpperCase();
+      if (h==='S' || h==='Ю' || h==='Z') v = -v;
+      return v;
+    }
+    function normalizeHemisphere(ch) {
+      const c = ch.toUpperCase();
+      if (c==='С') return 'N';
+      if (c==='Ю') return 'S';
+      if (c==='В') return 'E';
+      if (c==='З') return 'W';
+      return c; // N/S/E/W
+    }
+
+    function parsePripText(text) {
+      // Ищем строки с нумерацией 1. 2. ... и координатами
+      const lines = text.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
+      const features = [];
+      for (const line of lines) {
+        const m = line.match(ptRegex);
+        if (m) {
+          const latHem = normalizeHemisphere(m[4]);
+          const lonHem = normalizeHemisphere(m[8]);
+          const lat = dmsToDeg(m[1], m[2], m[3], latHem);
+          const lon = dmsToDeg(m[5], m[6], m[7], lonHem);
+          features.push({ type:'Feature', geometry:{type:'Point', coordinates:[lon, lat]}, properties:{ label: line } });
+        }
+      }
+      return { type:'FeatureCollection', features };
+    }
+
+    // --- Рендер ПРИПов на карту и в список ---
+    const pripsList = document.getElementById('pripsList');
+    const tabs = document.querySelectorAll('.tab');
+    let currentPort = 'Таганрог';
+    tabs.forEach(b => b.addEventListener('click', ()=>{
+      tabs.forEach(x=>x.classList.remove('active'));
+      b.classList.add('active');
+      currentPort = b.dataset.port;
+      render();
+    }));
+
+    function render() {
+      const all = loadPrips().filter(p => p.port===currentPort && !p.deleted);
+      // сортировка по номеру (ищем первое число в тексте)
+      all.sort((a,b)=>{
+        const na = (a.text.match(/\b(\d{1,4})\b/)||[])[1]||'0';
+        const nb = (b.text.match(/\b(\d{1,4})\b/)||[])[1]||'0';
+        return (+na)-(+nb);
+      });
+
+      pripsList.innerHTML = '';
+      layerGroup.clearLayers();
+
+      const now = new Date();
+      for (const p of all) {
+        const active = isActive(p);
+        // список слева
+        const item = document.createElement('div');
+        item.className = 'pripItem ' + (active ? 'active' : 'expired');
+        item.innerHTML = `
+          <div class="title">№ ${(p.text.match(/\b(\d{1,4})\b/)||[])[1]||'—'}</div>
+          <div class="text">${p.text.split('\n')[0]}</div>
+          <div class="meta">${p.startUtc||'∞'} → ${p.endUtc||'∞'} (UTC)</div>
+          ${active ? '' : '<button class="delBtn">Удалить устаревший</button>'}
+        `;
+        if (!active) {
+          item.querySelector('.delBtn').onclick = ()=>{
+            const arr = loadPrips();
+            const idx = arr.findIndex(x=>x.id===p.id);
+            if (idx>=0) { arr[idx].deleted = true; savePrips(arr); render(); }
+          };
+        }
+        pripsList.appendChild(item);
+
+        // объекты на карте
+        const color = active ? '#ff3b30' : '#666'; // красный / серый
+        try {
+          const fc = p.pts;
+          for (const f of fc.features) {
+            if (f.geometry.type==='Point') {
+              const [lon, lat] = f.geometry.coordinates;
+              const marker = L.circleMarker([lat, lon], { radius: 6, color, fillColor: color, fillOpacity: 0.9 });
+              marker.bindTooltip(f.properties?.label || 'Точка');
+              marker.addTo(layerGroup);
+            }
+            // полигоны можно добавить позже
+          }
+        } catch(e){}
       }
     }
 
-    document.getElementById('buyPro').addEventListener('click', () => createInvoice(null));
-    document.getElementById('giftPro').addEventListener('click', async () => {
-      const id = prompt("Введите Telegram ID получателя (число).");
-      if (id) createInvoice(Number(id));
-    });
+    // --- Предпросмотр / Сохранение ---
+    const parseStatus = document.getElementById('parseStatus');
+    const btnPreview = document.getElementById('btnPreview');
+    const btnSave = document.getElementById('btnSave');
+    btnPreview.onclick = ()=>{
+      layerGroup.clearLayers();
+      const txt = document.getElementById('pripText').value;
+      const fc = parsePripText(txt);
+      if (!fc.features.length) { parseStatus.textContent = 'Координаты не найдены'; return; }
+      parseStatus.textContent = `Найдено объектов: ${fc.features.length}`;
+      for (const f of fc.features) {
+        const [lon, lat] = f.geometry.coordinates;
+        L.circleMarker([lat, lon], { radius: 7, color:'#198cff', fillColor:'#198cff', fillOpacity:0.9 })
+          .bindTooltip(f.properties?.label || 'Точка')
+          .addTo(layerGroup);
+      }
+      const bounds = L.geoJSON(fc).getBounds();
+      if (bounds.isValid()) map.fitBounds(bounds.pad(0.2));
+    };
+    btnSave.onclick = ()=>{
+      const txt = document.getElementById('pripText').value.trim();
+      if (!txt) { parseStatus.textContent='Пустой текст'; return; }
+      const fc = parsePripText(txt);
+      const startUtc = document.getElementById('startUtc').value || null;
+      const endUtc   = document.getElementById('endUtc').value || null;
+      const port     = document.getElementById('port').value;
+      const arr = loadPrips();
+      arr.push({ id: crypto.randomUUID(), text: txt, pts: fc, startUtc, endUtc, port, deleted:false });
+      savePrips(arr);
+      document.getElementById('pripText').value = '';
+      parseStatus.textContent = 'Сохранено';
+      render();
+    };
+
+    // стартовый рендер
+    render();
   </script>
 </body>
 </html>
