@@ -2,7 +2,8 @@
 <html lang="ru">
 <head>
   <meta charset="UTF-8" />
-  <title>Mini App MVP</title>
+  <title>ПРИП Mini App</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="stylesheet" href="style.css" />
   <!-- Leaflet -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
@@ -12,27 +13,47 @@
 </head>
 <body>
   <header>
-    <h1>🌍 ПРИП / Mini App</h1>
-    <button id="buyPro">Купить PRO ⭐</button>
+    <h1>🌍 ПРИП / карта</h1>
+    <div class="actions">
+      <button id="buyPro">Купить PRO ⭐</button>
+      <button id="giftPro">Подарить 🎁</button>
+    </div>
   </header>
-
   <div id="map"></div>
 
   <script>
-    // Telegram API
-    const tg = window.Telegram.WebApp;
-    tg.expand(); // разворачиваем Mini App на весь экран
+    const API_BASE = "https://YOUR-BOT-HOST.com"; // замените
+    const PRICE_LABEL = "PRO 30 дней";
 
-    // Создаём карту
+    const tg = window.Telegram.WebApp;
+    tg.expand();
+
     const map = L.map('map').setView([44.6, 37.7], 7);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       attribution: '&copy; OpenStreetMap contributors'
     }).addTo(map);
 
-    // Кнопка "Купить PRO"
-    document.getElementById('buyPro').addEventListener('click', () => {
-      tg.showAlert('Здесь будет вызов оплаты через Stars 🚀');
-      // Позже заменим на tg.openInvoice(invoiceUrl) или вызов к вашему бэкенду
+    async function createInvoice(beneficiaryTgId) {
+      try {
+        const userId = beneficiaryTgId || (tg.initDataUnsafe?.user?.id);
+        if (!userId) throw new Error("Нет user.id из Telegram WebApp");
+        const res = await fetch(`${API_BASE}/invoice`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ beneficiaryTelegramId: userId, label: PRICE_LABEL })
+        });
+        const data = await res.json();
+        if (!data.url) throw new Error("Сервер не вернул ссылку инвойса");
+        tg.openInvoice(data.url);
+      } catch (e) {
+        tg.showAlert("Ошибка: " + e.message);
+      }
+    }
+
+    document.getElementById('buyPro').addEventListener('click', () => createInvoice(null));
+    document.getElementById('giftPro').addEventListener('click', async () => {
+      const id = prompt("Введите Telegram ID получателя (число).");
+      if (id) createInvoice(Number(id));
     });
   </script>
 </body>
