@@ -4,18 +4,36 @@
   <meta charset="UTF-8" />
   <title>Mini App MVP</title>
   <link rel="stylesheet" href="style.css" />
-  <!-- Подключаем Leaflet через CDN -->
+  <!-- Leaflet -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <!-- Telegram Mini App SDK -->
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
 </head>
 <body>
+  <header>
+    <h1>🌍 ПРИП / Mini App</h1>
+    <button id="buyPro">Купить PRO ⭐</button>
+  </header>
+
   <div id="map"></div>
+
   <script>
+    // Telegram API
+    const tg = window.Telegram.WebApp;
+    tg.expand(); // разворачиваем Mini App на весь экран
+
     // Создаём карту
     const map = L.map('map').setView([44.6, 37.7], 7);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       attribution: '&copy; OpenStreetMap contributors'
     }).addTo(map);
+
+    // Кнопка "Купить PRO"
+    document.getElementById('buyPro').addEventListener('click', () => {
+      tg.showAlert('Здесь будет вызов оплаты через Stars 🚀');
+      // Позже заменим на tg.openInvoice(invoiceUrl) или вызов к вашему бэкенду
+    });
   </script>
 </body>
 </html>
