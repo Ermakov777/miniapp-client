@@ -1,18 +1,43 @@
-html, body {
-  margin: 0; padding: 0; width: 100%; height: 100%;
-  font-family: Arial, sans-serif; background: #0f1115; color: #eaeef3;
+/* базовая раскладка */
+html, body { margin:0; padding:0; width:100%; height:100%; background:#0e1014; color:#e6e9ef; font-family: Inter, Arial, sans-serif; }
+#app { display:grid; grid-template-columns: 320px 1fr 360px; grid-template-rows: 100vh; }
+
+/* левая панель */
+#left { background:#12151c; border-right:1px solid #1e2330; overflow:auto; }
+.tabs { display:flex; gap:8px; padding:10px; position:sticky; top:0; background:#12151c; z-index:2; }
+.tab { background:#1a1f2b; color:#cdd6f4; border:none; padding:8px 10px; border-radius:10px; cursor:pointer; }
+.tab.active { background:#27314a; }
+
+#pripsList { padding:10px; display:flex; flex-direction:column; gap:10px; }
+.pripItem { background:#151924; border:1px solid #232a3a; border-radius:12px; padding:10px; }
+.pripItem.active { box-shadow:0 0 0 1px #ff3b30 inset; }
+.pripItem.expired { opacity:0.7; }
+.pripItem .title { font-weight:700; margin-bottom:6px; }
+.pripItem .text { font-size:13px; color:#c0c6d4; margin-bottom:6px; }
+.pripItem .meta { font-size:12px; color:#8a93a5; }
+.pripItem .delBtn { margin-top:8px; background:#2a2f3f; color:#cdd6f4; border:none; padding:6px 8px; border-radius:8px; cursor:pointer; }
+
+/* карта и оверлеи */
+#mapWrap { position:relative; }
+#map { width:100%; height:100%; }
+#crosshair { position:absolute; top:50%; left:50%; width:26px; height:26px; margin:-13px 0 0 -13px; border:2px solid rgba(255,255,255,0.5); border-radius:50%; pointer-events:none; }
+#crosshair::before, #crosshair::after { content:''; position:absolute; background:rgba(255,255,255,0.5); }
+#crosshair::before { left:50%; top:-10px; width:2px; height:46px; transform:translateX(-50%); }
+#crosshair::after { top:50%; left:-10px; height:2px; width:46px; transform:translateY(-50%); }
+#coordTip { position:absolute; left:50%; bottom:18px; transform:translateX(-50%); background:rgba(0,0,0,0.65); padding:6px 10px; border-radius:10px; font-size:13px; }
+
+/* правая панель */
+#right { background:#12151c; border-left:1px solid #1e2330; padding:12px; overflow:auto; }
+#right h3 { margin:4px 0 10px; }
+#right label { display:block; font-size:13px; color:#9ba6bf; margin:8px 0 4px; }
+#right input, #right select, #right textarea { width:100%; box-sizing:border-box; background:#0f1320; color:#e6e9ef; border:1px solid #25314a; border-radius:10px; padding:8px; }
+#right button { margin-top:8px; width:100%; background:#ffd000; color:#000; border:none; padding:10px; border-radius:10px; font-weight:700; cursor:pointer; }
+#right #parseStatus { margin-top:6px; font-size:12px; color:#9ba6bf; }
+
+/* мобильная версия */
+@media (max-width: 900px) {
+  #app { grid-template-columns: 1fr; grid-template-rows: calc(100vh - 220px) 220px; }
+  #left { grid-row: 2; order:2; }
+  #right { grid-row: 2; order:3; }
+  #mapWrap { grid-row: 1; order:1; }
 }
-header {
-  position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
-  background: rgba(0,0,0,0.6); padding: 10px 14px; border-radius: 14px;
-  display: flex; gap: 14px; align-items: center; z-index: 1000;
-  box-shadow: 0 6px 24px rgba(0,0,0,0.3);
-}
-header h1 { font-size: 16px; margin: 0; font-weight: 700; }
-.actions { display: flex; gap: 8px; }
-button {
-  background: #ffd000; border: none; padding: 8px 12px; border-radius: 10px;
-  font-weight: 700; cursor: pointer;
-}
-button:hover { background: #ffb800; }
-#map { width: 100%; height: 100%; }
